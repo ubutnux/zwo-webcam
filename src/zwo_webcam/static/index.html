@@ -1,0 +1,827 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ZWO Webcam</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: instrument console — the sky view fills the left, a scrolling control rack sits on the right,
+   a thin telemetry strip runs across the top. Stacks to one column on phones. */
+:root {
+  --bg: #eef1f5;
+  --surface: #ffffff;
+  --raise: #f4f6f9;
+  --line: #d9dfe8;
+  --fg: #151b26;
+  --muted: #5d687a;
+  --accent: #4553c8;
+  --accent-soft: #e5e8fb;
+  --accent-ink: #ffffff;
+  --good: #14804f;
+  --bad: #c0352b;
+  --stage: #07090c;
+  --stage-fg: #c9d1dd;
+  --shadow: 0 1px 2px rgb(20 30 50 / 6%), 0 8px 24px rgb(20 30 50 / 6%);
+
+  --f-display: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-body: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "Geist Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+
+  --s-xs: 11px; --s-sm: 12.5px; --s-md: 14px; --s-lg: 17px;
+  --r: 10px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0c1016; --surface: #131922; --raise: #19212c; --line: #252f3d; --fg: #e3e8ef; --muted: #8a96a9;
+    --accent: #95a3ff; --accent-soft: #1f2440; --accent-ink: #0d1030; --good: #5fd39b; --bad: #ff7f6e;
+    --stage: #05070a; --stage-fg: #c9d1dd; --shadow: none; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0c1016; --surface: #131922; --raise: #19212c; --line: #252f3d; --fg: #e3e8ef; --muted: #8a96a9;
+  --accent: #95a3ff; --accent-soft: #1f2440; --accent-ink: #0d1030; --good: #5fd39b; --bad: #ff7f6e;
+  --stage: #05070a; --stage-fg: #c9d1dd; --shadow: none; color-scheme: dark;
+}
+/* Night vision: everything in dim red so your eyes stay dark-adapted at the telescope */
+:root[data-night] {
+  --bg: #070000; --surface: #100202; --raise: #170404; --line: #2e0a0a; --fg: #e0402f; --muted: #8f2a20;
+  --accent: #ff3b2a; --accent-soft: #2a0705; --accent-ink: #120000; --good: #ff3b2a; --bad: #ff6a4d;
+  --stage: #000; --stage-fg: #c0392b; --shadow: none; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font: 400 var(--s-md)/1.45 var(--f-body);
+  -webkit-font-smoothing: antialiased;
+}
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
+
+/* ---------- telemetry bar ---------- */
+.bar {
+  display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+  padding-block: 10px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  border-bottom: 1px solid var(--line); background: var(--surface);
+}
+.brand { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.brand h1 { margin: 0; font: 600 var(--s-lg)/1 var(--f-display); letter-spacing: .02em; }
+.brand .cam { color: var(--muted); font-size: var(--s-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pill {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 8px; border-radius: 99px;
+  font: 600 var(--s-xs)/1.4 var(--f-display); letter-spacing: .08em; text-transform: uppercase;
+  background: var(--raise); color: var(--muted); border: 1px solid var(--line);
+}
+.pill i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.pill.live { color: var(--good); }
+.pill.live i { animation: pulse 2s ease-in-out infinite; }
+.pill.bad { color: var(--bad); }
+@keyframes pulse { 50% { opacity: .35; } }
+.telemetry { display: flex; gap: 18px; flex-wrap: wrap; margin-left: auto; }
+.tm { display: flex; flex-direction: column; line-height: 1.15; }
+.tm span { font: 500 10px/1.2 var(--f-display); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.tm b { font: 500 var(--s-sm)/1.3 var(--f-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bar-actions { display: flex; gap: 6px; }
+
+/* ---------- main ---------- */
+.main { display: grid; grid-template-columns: minmax(0, 1fr) 372px; min-height: 0; }
+.view { display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0;
+  padding: 16px; padding-left: max(16px, env(safe-area-inset-left, 0px)); }
+.stage {
+  position: relative; flex: 1; min-height: 240px; border-radius: var(--r); overflow: hidden;
+  background: var(--stage); display: grid; place-items: center;
+}
+.stage img { max-width: 100%; max-height: 100%; width: 100%; height: 100%; object-fit: contain; display: block; }
+:root[data-night] .stage img { filter: grayscale(1) sepia(1) saturate(8) hue-rotate(-45deg) brightness(.55); }
+.stage .empty { position: absolute; color: var(--stage-fg); opacity: .7; font-size: var(--s-sm); text-align: center; padding: 16px; }
+.stage .reticle { position: absolute; inset: 0; pointer-events: none; display: none; }
+.stage.crosshair .reticle { display: block; }
+.reticle::before, .reticle::after { content: ""; position: absolute; background: rgb(255 80 60 / 70%); }
+.reticle::before { left: 50%; top: 0; bottom: 0; width: 1px; }
+.reticle::after { top: 50%; left: 0; right: 0; height: 1px; }
+.reticle span { position: absolute; left: 50%; top: 50%; width: 18%; aspect-ratio: 1; max-width: 100%;
+  transform: translate(-50%, -50%); border: 1px solid rgb(255 80 60 / 70%); border-radius: 50%; }
+.overlay {
+  position: absolute; right: 12px; bottom: 12px; display: flex; gap: 6px;
+  opacity: 0; transition: opacity .2s;
+}
+.stage:hover .overlay, .stage:focus-within .overlay, .stage:fullscreen .overlay { opacity: 1; }
+@media (hover: none) { .overlay { opacity: 1; } }
+.ovbtn {
+  border: 0; border-radius: 8px; padding: 7px 11px; cursor: pointer;
+  background: rgb(10 14 20 / 72%); color: #e8edf4; backdrop-filter: blur(6px);
+  font: 500 var(--s-sm)/1 var(--f-body);
+}
+:root[data-night] .ovbtn { color: var(--fg); }
+.ovbtn:hover { background: rgb(10 14 20 / 90%); }
+.ovbtn[aria-pressed="true"] { color: var(--accent); }
+.stage .badge { position: absolute; left: 12px; top: 12px; font: 500 var(--s-xs)/1 var(--f-mono);
+  color: var(--stage-fg); background: rgb(0 0 0 / 45%); padding: 5px 7px; border-radius: 6px; }
+
+/* stream delivery strip under the picture */
+.delivery { display: flex; align-items: center; gap: 12px 16px; flex-wrap: wrap; }
+.delivery .grow { flex: 1; }
+.delivery .url { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted); font-size: var(--s-sm); }
+.delivery .url code { font: 400 var(--s-xs)/1.3 var(--f-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- control rack ---------- */
+.rack { border-left: 1px solid var(--line); background: var(--surface); overflow-y: auto; min-height: 0;
+  padding-right: env(safe-area-inset-right, 0px); }
+.group { border-bottom: 1px solid var(--line); }
+.group > summary {
+  list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px;
+  padding: 14px 18px; font: 600 var(--s-xs)/1 var(--f-display); letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
+}
+.group > summary::-webkit-details-marker { display: none; }
+.group > summary::after { content: ""; margin-left: auto; width: 7px; height: 7px; border-right: 1.5px solid; border-bottom: 1.5px solid;
+  transform: rotate(45deg) translateY(-2px); transition: transform .15s; }
+.group:not([open]) > summary::after { transform: rotate(-45deg); }
+.group > summary:hover { color: var(--fg); }
+.group .body { display: flex; flex-direction: column; gap: 16px; padding: 2px 18px 18px; }
+
+.ctl { display: flex; flex-direction: column; gap: 6px; }
+.ctl .head { display: flex; align-items: center; gap: 10px; }
+.ctl label.name { flex: 1; font-weight: 500; }
+.ctl .val {
+  width: 92px; text-align: right; padding: 3px 7px; border-radius: 6px; border: 1px solid transparent; background: transparent;
+  font: 500 var(--s-sm)/1.4 var(--f-mono); font-variant-numeric: tabular-nums;
+}
+.ctl .val:hover:not(:disabled) { border-color: var(--line); }
+.ctl .val:focus { border-color: var(--accent); background: var(--raise); outline: none; }
+.ctl .val:disabled { color: var(--muted); }
+.ctl .readout { font: 500 var(--s-sm)/1.4 var(--f-mono); }
+.hint { color: var(--muted); font-size: var(--s-xs); margin: 0; }
+
+input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 22px; background: transparent; margin: 0; cursor: pointer; }
+input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 4px;
+  background: linear-gradient(to right, var(--accent) var(--p, 0%), var(--line) var(--p, 0%)); }
+input[type=range]::-moz-range-track { height: 4px; border-radius: 4px; background: var(--line); }
+input[type=range]::-moz-range-progress { height: 4px; border-radius: 4px; background: var(--accent); }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; margin-top: -6px; border-radius: 50%;
+  background: var(--surface); border: 2px solid var(--accent); box-shadow: 0 1px 3px rgb(0 0 0 / 25%); }
+input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--surface); border: 2px solid var(--accent); }
+input[type=range]:disabled { cursor: default; opacity: .45; }
+
+/* switch */
+.switch { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; font-size: var(--s-sm); color: var(--muted); user-select: none; }
+.switch input { appearance: none; -webkit-appearance: none; width: 30px; height: 18px; border-radius: 99px; background: var(--line);
+  position: relative; cursor: pointer; transition: background .15s; margin: 0; flex: none; }
+.switch input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--surface); transition: transform .15s; box-shadow: 0 1px 2px rgb(0 0 0 / 30%); }
+.switch input:checked { background: var(--accent); }
+.switch input:checked::after { transform: translateX(12px); }
+.switch:has(input:checked) { color: var(--fg); }
+
+/* segmented control */
+.seg { display: inline-flex; padding: 2px; border-radius: 8px; background: var(--raise); border: 1px solid var(--line); flex-wrap: wrap; }
+.seg button { border: 0; background: transparent; padding: 5px 11px; border-radius: 6px; cursor: pointer; color: var(--muted);
+  font: 500 var(--s-sm)/1.2 var(--f-body); white-space: nowrap; }
+.seg button:hover { color: var(--fg); }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--fg); box-shadow: 0 1px 2px rgb(0 0 0 / 15%); }
+:root[data-night] .seg button[aria-pressed="true"], .seg.accent button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.seg.full { display: flex; }
+.seg.grid2x2 { display: grid; grid-template-columns: 1fr 1fr; }
+.seg.full button { flex: 1; }
+
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { border: 1px solid var(--line); background: transparent; border-radius: 99px; padding: 3px 10px; cursor: pointer;
+  font: 500 var(--s-xs)/1.5 var(--f-mono); color: var(--muted); }
+.chip:hover { color: var(--fg); border-color: var(--muted); }
+.chip.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+
+.btn { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 6px 12px; cursor: pointer;
+  font: 500 var(--s-sm)/1.2 var(--f-body); display: inline-flex; align-items: center; gap: 6px; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.ghost { border-color: transparent; background: transparent; color: var(--muted); }
+.btn.ghost:hover { color: var(--fg); background: var(--raise); }
+.btn[aria-pressed="true"] { color: var(--accent); }
+.btn svg, .ovbtn svg { width: 15px; height: 15px; display: block; }
+.ovbtn { display: inline-flex; align-items: center; gap: 6px; }
+
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field > span { font-weight: 500; }
+.row2 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.row2 label { display: flex; flex-direction: column; gap: 4px; font-size: var(--s-xs); color: var(--muted); }
+select { padding: 5px 8px; border-radius: 7px; border: 1px solid var(--line); background: var(--raise); }
+
+/* histogram */
+.histo { position: relative; height: 64px; border-radius: 8px; background: var(--raise); border: 1px solid var(--line); overflow: hidden; }
+.histo canvas { width: 100%; height: 100%; display: block; }
+.histo-meta { display: flex; justify-content: space-between; font: 400 var(--s-xs)/1.3 var(--f-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.histo-meta .warn { color: var(--bad); }
+
+.info dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0; font-size: var(--s-sm); }
+.info dt { color: var(--muted); }
+.info dd { margin: 0; font-family: var(--f-mono); font-size: var(--s-xs); align-self: center; text-align: right; overflow-wrap: anywhere; }
+
+/* banner + toasts */
+.banner { display: none; align-items: center; gap: 10px; padding: 10px 14px; border-radius: var(--r);
+  background: var(--accent-soft); color: var(--fg); border: 1px solid var(--line); font-size: var(--s-sm); }
+.banner.show { display: flex; }
+.banner b { color: var(--bad); font-weight: 600; }
+.toasts { position: fixed; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%);
+  display: flex; flex-direction: column; gap: 8px; align-items: center; z-index: 20; pointer-events: none; width: max-content; max-width: calc(100% - 32px); }
+.toast { background: var(--fg); color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: var(--s-sm); box-shadow: var(--shadow);
+  animation: rise .2s ease-out; }
+.toast.err { background: var(--bad); color: #fff; }
+@keyframes rise { from { transform: translateY(8px); opacity: 0; } }
+
+@media (max-width: 1240px) {
+  .telemetry { margin-left: 0; order: 3; width: 100%; }
+  .bar { row-gap: 10px; }
+  .bar-actions { margin-left: auto; }
+}
+@media (max-width: 980px) {
+  .app { height: auto; }
+  .main { grid-template-columns: minmax(0, 1fr); }
+  .view { padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .stage { flex: none; aspect-ratio: 4 / 3; max-width: 100%; }
+  .rack { border-left: 0; border-top: 1px solid var(--line); overflow: visible;
+    padding-left: env(safe-area-inset-left, 0px); }
+  .telemetry { margin-left: 0; order: 3; width: 100%; gap: 14px; }
+  .bar { gap: 10px 14px; }
+  .bar-actions { margin-left: auto; }
+}
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="bar">
+    <div class="brand">
+      <h1>ZWO Webcam</h1>
+      <span class="cam" id="camname">Connecting…</span>
+    </div>
+    <span class="pill" id="state"><i></i><span id="statetext">Connecting</span></span>
+    <div class="telemetry">
+      <div class="tm"><span>Capture</span><b id="t-fps">–</b></div>
+      <div class="tm"><span>Display</span><b id="t-dfps">–</b></div>
+      <div class="tm"><span>Frame</span><b id="t-size">–</b></div>
+      <div class="tm"><span>Upload</span><b id="t-kbps">–</b></div>
+      <div class="tm"><span>Viewers</span><b id="t-viewers">–</b></div>
+      <div class="tm"><span>Sensor</span><b id="t-temp">–</b></div>
+      <div class="tm"><span>Dropped</span><b id="t-drop">–</b></div>
+    </div>
+    <div class="bar-actions">
+      <button class="btn ghost" id="night" aria-pressed="false" title="Night vision: dim red interface (N)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+        Night
+      </button>
+    </div>
+  </header>
+
+  <div class="main">
+    <section class="view">
+      <div class="banner" id="banner"><b>Camera offline.</b><span id="bannertext"></span></div>
+      <div class="stage" id="stage">
+        <span class="empty" id="empty">Waiting for the first frame…</span>
+        <img id="video" alt="Live camera view">
+        <div class="reticle"><span></span></div>
+        <span class="badge" id="badge" hidden></span>
+        <div class="overlay">
+          <button class="ovbtn" id="cross" aria-pressed="false" title="Framing crosshair (C)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="7"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/></svg>
+            Crosshair
+          </button>
+          <button class="ovbtn" id="snap" title="Download a full-resolution snapshot (S)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+            Snapshot
+          </button>
+          <button class="ovbtn" id="fs" title="Full screen (F)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+            Full screen
+          </button>
+        </div>
+      </div>
+
+      <div class="delivery">
+        <div class="seg accent" id="presets" role="group" aria-label="Stream quality">
+          <button data-preset="saver" title="640 px · quality 45 · 5 fps">Data saver</button>
+          <button data-preset="balanced" title="1280 px · quality 70 · 10 fps">Balanced</button>
+          <button data-preset="sharp" title="1920 px · quality 85 · 15 fps">Sharp</button>
+          <button data-preset="full" title="Native resolution · quality 92 · 15 fps">Full</button>
+          <button data-preset="custom">Custom</button>
+        </div>
+        <div class="seg" id="mode" role="group" aria-label="Delivery">
+          <button data-mode="mjpeg" title="Continuous MJPEG stream">Live stream</button>
+          <button data-mode="poll" title="Requests one frame at a time. Most stable on slow or mobile connections.">Frame by frame</button>
+        </div>
+        <span class="grow"></span>
+        <div class="url">
+          <code id="url"></code>
+          <button class="btn ghost" id="copy" title="Copy the stream link for VLC, OBS or Home Assistant">Copy link</button>
+        </div>
+      </div>
+      <div class="row2" id="custom" hidden>
+        <label for="c-fps">Frame rate
+          <select id="c-fps"><option>0.5</option><option>1</option><option>2</option><option>5</option><option>10</option><option>15</option><option>20</option><option>30</option></select>
+        </label>
+        <label for="c-q">JPEG quality
+          <select id="c-q"><option>30</option><option>45</option><option>60</option><option>70</option><option>85</option><option>92</option></select>
+        </label>
+        <label for="c-w">Max width
+          <select id="c-w"><option value="320">320 px</option><option value="640">640 px</option><option value="960">960 px</option><option value="1280">1280 px</option><option value="1920">1920 px</option><option value="0">Native</option></select>
+        </label>
+      </div>
+    </section>
+
+    <aside class="rack" id="rack">
+      <details class="group" open id="g-exposure">
+        <summary>Exposure</summary>
+        <div class="body">
+          <div class="field">
+            <div class="histo"><canvas id="histo" width="256" height="64"></canvas></div>
+            <div class="histo-meta"><span id="h-mean">Mean –</span><span id="h-clip">Clipped –</span></div>
+          </div>
+          <div class="chips" id="expchips" aria-label="Exposure presets"></div>
+          <div class="ctls" style="display:contents"></div>
+        </div>
+      </details>
+      <details class="group" open id="g-image">
+        <summary>Image</summary>
+        <div class="body">
+          <div class="field"><span>Binning</span><div class="seg full" id="bin" role="group" aria-label="Binning"></div></div>
+          <div class="field"><span>Pixel format</span><div class="seg full" id="imgtype" role="group" aria-label="Pixel format"></div></div>
+          <label class="switch"><input type="checkbox" id="stretch"> Auto-stretch faint detail</label>
+          <div class="field">
+            <span>Timestamp</span>
+            <div class="seg full" id="stamp" role="group" aria-label="Timestamp"></div>
+            <div class="seg grid2x2" id="stamppos" role="group" aria-label="Timestamp position"></div>
+            <p class="hint">Capture time is burned into the stream, snapshots and the shared link.</p>
+          </div>
+          <div class="field" id="colorbox" hidden>
+            <label class="switch"><input type="checkbox" id="debayer"> Debayer RAW frames on the server</label>
+            <label class="field" for="bayer"><span>Bayer pattern</span>
+              <select id="bayer"><option value="auto">From camera</option><option value="0">RGGB</option><option value="1">BGGR</option><option value="2">GRBG</option><option value="3">GBRG</option></select>
+            </label>
+            <p class="hint">Change this only if red and blue look swapped.</p>
+          </div>
+          <div class="ctls" style="display:contents"></div>
+        </div>
+      </details>
+      <details class="group" id="g-auto"><summary>Auto exposure limits</summary><div class="body"><div class="ctls" style="display:contents"></div></div></details>
+      <details class="group" id="g-usb"><summary>USB &amp; speed</summary><div class="body"><div class="ctls" style="display:contents"></div></div></details>
+      <details class="group" id="g-sensor"><summary>Sensor</summary><div class="body"><div class="ctls" style="display:contents"></div></div></details>
+      <details class="group" id="g-more"><summary>More controls</summary><div class="body"><div class="ctls" style="display:contents"></div></div></details>
+      <details class="group info" id="g-info"><summary>Camera details</summary><div class="body"><dl id="info"></dl></div></details>
+    </aside>
+  </div>
+</div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("zwo." + k); return v === null ? d : v; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("zwo." + k, v); } catch {} },
+};
+
+// ---------- helpers ----------
+function toast(msg, err) {
+  const t = document.createElement("div");
+  t.className = "toast" + (err ? " err" : "");
+  t.textContent = msg;
+  $("toasts").appendChild(t);
+  setTimeout(() => t.remove(), err ? 5000 : 2200);
+}
+async function api(path, body) {
+  const r = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : { cache: "no-store" });
+  if (!r.ok) throw new Error((await r.text()) || r.statusText);
+  return r.json();
+}
+const fmtBytes = (n) => n >= 1e6 ? (n / 1e6).toFixed(2) + " MB" : (n / 1e3).toFixed(1) + " KB";
+const fmtKbps = (k) => k >= 1000 ? (k / 1000).toFixed(1) + " Mb/s" : Math.round(k) + " kb/s";
+function fmtExposure(us) {
+  if (us >= 1e6) return +(us / 1e6).toFixed(us >= 1e7 ? 0 : 2) + " s";
+  if (us >= 1000) return +(us / 1000).toFixed(us >= 1e5 ? 0 : 2) + " ms";
+  return us + " µs";
+}
+function parseExposure(s) {
+  const m = String(s).trim().toLowerCase().replace(",", ".").match(/^([\d.]+)\s*(us|µs|ms|s)?$/);
+  if (!m) return NaN;
+  const n = parseFloat(m[1]);
+  return Math.round(n * ({ us: 1, "µs": 1, ms: 1000, s: 1e6 }[m[2] || "ms"]));
+}
+function setRangeFill(r) {
+  const p = (r.value - r.min) / ((r.max - r.min) || 1) * 100;
+  r.style.setProperty("--p", p + "%");
+}
+function segment(el, items, current, onPick) {
+  el.innerHTML = "";
+  for (const it of items) {
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = it.label; b.dataset.value = it.value;
+    if (it.title) b.title = it.title;
+    b.setAttribute("aria-pressed", String(String(it.value) === String(current)));
+    b.onclick = () => onPick(it.value);
+    el.appendChild(b);
+  }
+}
+function pressSeg(el, value) {
+  for (const b of el.querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.value === String(value) || b.dataset.preset === value || b.dataset.mode === value));
+}
+
+// ---------- stream delivery ----------
+const PRESETS = {
+  saver: { fps: 5, q: 45, w: 640 },
+  balanced: { fps: 10, q: 70, w: 1280 },
+  sharp: { fps: 15, q: 85, w: 1920 },
+  full: { fps: 15, q: 92, w: 0 },
+};
+let preset = store.get("preset", "balanced");
+let mode = store.get("mode", "mjpeg");
+let custom = { fps: +store.get("c-fps", 10), q: +store.get("c-q", 70), w: +store.get("c-w", 1280) };
+let pollToken = 0, shown = [];
+
+const settings = () => preset === "custom" ? custom : PRESETS[preset] || PRESETS.balanced;
+const qs = () => { const s = settings(); return `fps=${s.fps}&q=${s.q}&w=${s.w}`; };
+
+function markShown(bytes) {
+  const now = performance.now();
+  shown.push(now);
+  shown = shown.filter((t) => now - t < 3000);
+  if (bytes) $("t-size").textContent = fmtBytes(bytes);
+  $("empty").hidden = true;
+}
+
+function startView() {
+  pollToken++;
+  const img = $("video");
+  const url = `/stream.mjpg?${qs()}`;
+  $("url").textContent = location.origin + url;
+  pressSeg($("presets"), preset);
+  pressSeg($("mode"), mode);
+  $("custom").hidden = preset !== "custom";
+  if (img.src.startsWith("blob:")) URL.revokeObjectURL(img.src);
+  shown = [];
+  if (mode === "mjpeg") {
+    img.onload = () => markShown(0);
+    img.src = url;
+    $("t-size").textContent = "–";
+  } else {
+    img.onload = null;
+    img.removeAttribute("src");
+    pollLoop(pollToken);
+  }
+}
+async function pollLoop(token) {
+  let seq = 0;
+  while (token === pollToken) {
+    const t0 = performance.now();
+    try {
+      const r = await fetch(`/snapshot.jpg?after=${seq}&${qs()}`, { cache: "no-store" });
+      if (!r.ok) throw new Error(await r.text());
+      seq = +r.headers.get("X-Frame-Seq") || seq;
+      const blob = await r.blob();
+      if (token !== pollToken) break;
+      const img = $("video"), old = img.src;
+      img.src = URL.createObjectURL(blob);
+      if (old.startsWith("blob:")) URL.revokeObjectURL(old);
+      markShown(blob.size);
+    } catch {
+      await new Promise((res) => setTimeout(res, 2000));
+    }
+    const wait = 1000 / settings().fps - (performance.now() - t0);
+    if (wait > 0) await new Promise((res) => setTimeout(res, wait));
+  }
+}
+$("presets").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  preset = b.dataset.preset; store.set("preset", preset); startView();
+});
+$("mode").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  mode = b.dataset.mode; store.set("mode", mode); startView();
+});
+for (const k of ["fps", "q", "w"]) {
+  const el = $("c-" + k);
+  el.value = custom[k];
+  el.addEventListener("change", () => { custom[k] = +el.value; store.set("c-" + k, el.value); startView(); });
+}
+$("copy").onclick = async () => {
+  const text = $("url").textContent;
+  try { await navigator.clipboard.writeText(text); toast("Stream link copied"); }
+  catch { const r = document.createRange(); r.selectNodeContents($("url")); getSelection().removeAllRanges(); getSelection().addRange(r); toast("Link selected. Press Ctrl+C to copy."); }
+};
+
+// ---------- stage tools ----------
+function snapshot() { location.href = "/snapshot.jpg?q=95&w=0&download=1"; toast("Saving full-resolution snapshot"); }
+function fullscreen() {
+  const s = $("stage");
+  (document.fullscreenElement ? document.exitFullscreen() : s.requestFullscreen?.())?.catch?.(() => toast("Full screen is not available here", true));
+}
+function crosshair(on = !$("stage").classList.contains("crosshair")) {
+  $("stage").classList.toggle("crosshair", on);
+  $("cross").setAttribute("aria-pressed", String(on));
+  store.set("cross", on ? "1" : "");
+}
+function night(on = !document.documentElement.hasAttribute("data-night")) {
+  document.documentElement.toggleAttribute("data-night", on);
+  $("night").setAttribute("aria-pressed", String(on));
+  store.set("night", on ? "1" : "");
+}
+$("snap").onclick = snapshot;
+$("fs").onclick = fullscreen;
+$("cross").onclick = () => crosshair();
+$("night").onclick = () => night();
+document.addEventListener("keydown", (e) => {
+  if (e.ctrlKey || e.metaKey || e.altKey || e.target.closest("input, select, textarea")) return;
+  const k = e.key.toLowerCase();
+  if (k === "f") fullscreen(); else if (k === "s") snapshot(); else if (k === "c") crosshair(); else if (k === "n") night();
+});
+
+// ---------- histogram (computed in the browser from the displayed frame) ----------
+const hcan = document.createElement("canvas");
+const hctx = hcan.getContext("2d", { willReadFrequently: true });
+function histogram() {
+  const img = $("video");
+  if (!img.naturalWidth || document.hidden || !$("g-exposure").open) return;
+  const w = 192, h = Math.max(1, Math.round(192 * img.naturalHeight / img.naturalWidth));
+  hcan.width = w; hcan.height = h;
+  try { hctx.drawImage(img, 0, 0, w, h); } catch { return; }
+  const d = hctx.getImageData(0, 0, w, h).data;
+  const bins = new Uint32Array(256);
+  let sum = 0, clip = 0, n = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    const v = Math.max(d[i], d[i + 1], d[i + 2]);
+    bins[v]++; sum += v; n++;
+    if (v >= 254) clip++;
+  }
+  const c = $("histo"), ctx = c.getContext("2d");
+  const css = getComputedStyle(document.documentElement);
+  ctx.clearRect(0, 0, 256, 64);
+  let max = 1;
+  for (let i = 1; i < 255; i++) max = Math.max(max, bins[i]);
+  ctx.fillStyle = css.getPropertyValue("--accent").trim();
+  ctx.globalAlpha = .85;
+  for (let i = 0; i < 256; i++) {
+    const hgt = Math.min(64, Math.sqrt(bins[i] / max) * 62);
+    ctx.fillRect(i, 64 - hgt, 1, hgt);
+  }
+  ctx.globalAlpha = 1;
+  const pct = clip / n * 100;
+  $("h-mean").textContent = `Mean ${Math.round(sum / n)} / 255`;
+  $("h-clip").textContent = `Clipped ${pct.toFixed(pct < 1 ? 2 : 1)}%`;
+  $("h-clip").className = pct > 0.5 ? "warn" : "";
+}
+setInterval(histogram, 700);
+
+// ---------- camera controls ----------
+const GROUPS = {
+  exposure: ["Exposure", "Gain", "Offset"],
+  image: ["Flip", "WB_R", "WB_B", "Gamma", "Brightness", "MonoBin", "Mono bin"],
+  auto: ["AutoExpMaxGain", "AutoExpMaxExpMS", "AutoExpMaxExp", "AutoExpTargetBrightness"],
+  usb: ["BandWidth", "HighSpeedMode", "HardwareBin"],
+  sensor: ["Temperature", "CoolerOn", "TargetTemp", "CoolPowerPerc", "AntiDewHeater", "FanOn"],
+};
+const LABELS = {
+  Exposure: "Exposure", Gain: "Gain", Offset: "Offset", Flip: "Flip", WB_R: "White balance · red", WB_B: "White balance · blue",
+  AutoExpMaxGain: "Max gain", AutoExpMaxExpMS: "Max exposure", AutoExpMaxExp: "Max exposure", AutoExpTargetBrightness: "Target brightness",
+  BandWidth: "USB bandwidth", HighSpeedMode: "High-speed mode", HardwareBin: "Hardware binning", Temperature: "Sensor temperature",
+  CoolerOn: "Cooler", TargetTemp: "Target temperature", CoolPowerPerc: "Cooler power", AntiDewHeater: "Anti-dew heater", FanOn: "Fan",
+  MonoBin: "Mono binning",
+};
+const UNITS = { AutoExpMaxExpMS: " ms", BandWidth: " %", CoolPowerPerc: " %", TargetTemp: " °C" };
+const EXPOSURE_PRESETS = [100, 1000, 10000, 50000, 200000, 1e6, 5e6];
+const LOG = new Set(["Exposure"]);
+let builtFor = "", controlsByName = {};
+
+function groupOf(name) {
+  for (const [g, names] of Object.entries(GROUPS)) if (names.includes(name)) return g;
+  return "more";
+}
+const toSlider = (c, v) => LOG.has(c.name) ? Math.round((Math.log(Math.max(1, v)) - Math.log(Math.max(1, c.min))) / (Math.log(c.max) - Math.log(Math.max(1, c.min))) * 1000) : v;
+const fromSlider = (c, s) => LOG.has(c.name) ? Math.round(Math.exp(Math.log(Math.max(1, c.min)) + (Math.log(c.max) - Math.log(Math.max(1, c.min))) * s / 1000)) : +s;
+function display(c, v) {
+  if (c.name === "Exposure") return fmtExposure(v);
+  if (c.name === "Temperature") return (v / 10).toFixed(1) + " °C";
+  return v + (UNITS[c.name] || "");
+}
+function parseInput(c, s) {
+  if (c.name === "Exposure") return parseExposure(s);
+  return Math.round(parseFloat(String(s).replace(",", ".")));
+}
+
+async function sendControl(c, value, auto) {
+  value = Math.max(c.min, Math.min(c.max, value));
+  try {
+    await api("/api/control", { name: c.name, value, auto });
+    toast(`${LABELS[c.name] || c.name} ${auto ? "set to auto" : "→ " + display(c, value)}`);
+  } catch (e) { toast(`Could not change ${LABELS[c.name] || c.name}: ${e.message}`, true); }
+}
+
+function buildControl(c) {
+  const el = document.createElement("div");
+  el.className = "ctl"; el.dataset.name = c.name;
+  const id = "ctl-" + c.name.replace(/\W/g, "");
+  const label = LABELS[c.name] || c.name;
+  const head = document.createElement("div"); head.className = "head";
+  head.innerHTML = `<label class="name" for="${id}" title="${c.description.replace(/"/g, "&quot;")}">${label}</label>`;
+  el.appendChild(head);
+
+  if (!c.writable) {
+    const ro = document.createElement("span"); ro.className = "readout";
+    head.appendChild(ro);
+    el.update = (v) => { ro.textContent = display(c, v); };
+    return el;
+  }
+  // on/off controls become a switch
+  if (c.min === 0 && c.max === 1) {
+    head.innerHTML = "";
+    const sw = document.createElement("label"); sw.className = "switch"; sw.title = c.description;
+    sw.innerHTML = `<input type="checkbox" id="${id}"> ${label}`;
+    head.appendChild(sw);
+    const cb = sw.querySelector("input");
+    cb.onchange = () => sendControl(c, cb.checked ? 1 : 0, false);
+    el.update = (v) => { if (document.activeElement !== cb) cb.checked = !!v; };
+    return el;
+  }
+  // flip becomes a segmented control
+  if (c.name === "Flip" && c.max === 3) {
+    const seg = document.createElement("div"); seg.className = "seg full"; seg.setAttribute("role", "group");
+    segment(seg, [{ label: "None", value: 0 }, { label: "Horizontal", value: 1 }, { label: "Vertical", value: 2 }, { label: "Both", value: 3 }], -1,
+      (v) => { pressSeg(seg, v); sendControl(c, v, false); });
+    el.appendChild(seg);
+    el.update = (v) => pressSeg(seg, v);
+    return el;
+  }
+
+  let auto = null;
+  if (c.auto_supported) {
+    const sw = document.createElement("label"); sw.className = "switch";
+    sw.innerHTML = `<input type="checkbox" id="${id}-auto"> Auto`;
+    head.appendChild(sw);
+    auto = sw.querySelector("input");
+  }
+  const val = document.createElement("input");
+  val.className = "val"; val.id = id; val.inputMode = c.name === "Exposure" ? "text" : "numeric";
+  val.title = c.name === "Exposure" ? "Type a value like 250us, 20ms or 2s" : `${c.min} – ${c.max}`;
+  head.appendChild(val);
+  const rng = document.createElement("input");
+  rng.type = "range"; rng.id = id + "-range"; rng.setAttribute("aria-label", label);
+  rng.min = LOG.has(c.name) ? 0 : c.min; rng.max = LOG.has(c.name) ? 1000 : c.max; rng.step = 1;
+  el.appendChild(rng);
+
+  let current = c.default;
+  const show = (v) => { current = v; val.value = display(c, v); rng.value = toSlider(c, v); setRangeFill(rng); };
+  rng.addEventListener("input", () => { el.dataset.busy = "1"; const v = fromSlider(c, rng.value); val.value = display(c, v); setRangeFill(rng); });
+  rng.addEventListener("change", () => { delete el.dataset.busy; const v = fromSlider(c, rng.value); show(v); sendControl(c, v, false); if (auto) auto.checked = false; });
+  val.addEventListener("focus", () => { val.select(); });
+  val.addEventListener("keydown", (e) => { if (e.key === "Enter") val.blur(); if (e.key === "Escape") { show(current); val.blur(); } });
+  val.addEventListener("change", () => {
+    const v = parseInput(c, val.value);
+    if (!Number.isFinite(v)) { toast(`Enter a number for ${label}${c.name === "Exposure" ? ", e.g. 20ms or 2s" : ""}`, true); show(current); return; }
+    const cl = Math.max(c.min, Math.min(c.max, v));
+    show(cl); sendControl(c, cl, false);
+  });
+  if (auto) auto.addEventListener("change", () => { val.disabled = rng.disabled = auto.checked; sendControl(c, current, auto.checked); });
+
+  el.update = (v, a) => {
+    if (auto && document.activeElement !== auto) { auto.checked = a; val.disabled = rng.disabled = a; }
+    if (el.dataset.busy || document.activeElement === val) return;
+    show(v);
+  };
+  el.setValue = show;
+  return el;
+}
+
+function buildControls(st) {
+  controlsByName = {};
+  for (const g of ["exposure", "image", "auto", "usb", "sensor", "more"]) $("g-" + g).querySelector(".ctls").innerHTML = "";
+  const order = (n) => { const g = GROUPS[groupOf(n)]; return g ? g.indexOf(n) : 99; };
+  for (const c of [...st.controls].sort((a, b) => order(a.name) - order(b.name))) {
+    const el = buildControl(c);
+    controlsByName[c.name] = { c, el };
+    $("g-" + groupOf(c.name)).querySelector(".ctls").appendChild(el);
+  }
+  for (const g of ["auto", "usb", "sensor", "more"]) $("g-" + g).hidden = !$("g-" + g).querySelector(".ctl");
+
+  // exposure presets
+  const exp = controlsByName.Exposure;
+  const chips = $("expchips");
+  chips.innerHTML = "";
+  chips.hidden = !exp;
+  if (exp) for (const us of EXPOSURE_PRESETS.filter((u) => u >= exp.c.min && u <= exp.c.max)) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "chip"; b.textContent = fmtExposure(us); b.dataset.us = us;
+    b.onclick = () => { exp.el.setValue(us); sendControl(exp.c, us, false); markChips(us); };
+    chips.appendChild(b);
+  }
+
+  // format
+  segment($("bin"), st.camera.bins.map((b) => ({ label: `${b}×${b}`, value: b,
+    title: `${Math.floor(st.camera.max_width / b)}×${Math.floor(st.camera.max_height / b)}` })), st.format.bin,
+    (v) => sendFormat(+v, status.format.img_type));
+  const TYPE_HINT = { RAW8: "8-bit raw sensor data", RGB24: "Colour, debayered by the camera driver", RAW16: "16-bit raw, shown as 8-bit", Y8: "8-bit luminance" };
+  segment($("imgtype"), st.formats.map((f) => ({ label: f.name, value: f.id, title: TYPE_HINT[f.name] })), st.format.img_type,
+    (v) => sendFormat(status.format.bin, +v));
+  $("colorbox").hidden = !st.camera.is_color;
+}
+function markChips(us) { for (const b of $("expchips").children) b.classList.toggle("on", +b.dataset.us === us); }
+
+async function sendFormat(bin, img_type) {
+  try {
+    await api("/api/format", { bin, img_type });
+    toast("Format changed");
+    refresh();
+  } catch (e) { toast("Could not change format: " + e.message, true); }
+}
+const STAMP_LABELS = { off: "Off", local: "Local time", utc: "UTC" };
+segment($("stamp"), Object.entries(STAMP_LABELS).map(([value, label]) => ({ label, value })), "",
+  (v) => setStamp({ timestamp: v }, v === "off" ? "Timestamp hidden" : `Timestamp in ${STAMP_LABELS[v]}`));
+segment($("stamppos"), [
+  { label: "Top left", value: "tl" }, { label: "Top right", value: "tr" },
+  { label: "Bottom left", value: "bl" }, { label: "Bottom right", value: "br" },
+], "", (v) => setStamp({ timestamp_pos: v }, "Timestamp moved"));
+async function setStamp(body, msg) {
+  try { await api("/api/process", body); toast(msg); refresh(); }
+  catch (e) { toast("Could not change the timestamp: " + e.message, true); }
+}
+$("stretch").onchange =() => api("/api/process", { stretch: $("stretch").checked }).catch((e) => toast(e.message, true));
+$("debayer").onchange = () => api("/api/process", { debayer: $("debayer").checked }).catch((e) => toast(e.message, true));
+$("bayer").onchange = () => api("/api/process", { bayer: $("bayer").value }).catch((e) => toast(e.message, true));
+
+// ---------- status polling ----------
+let status = null;
+function setState(kind, text) {
+  $("state").className = "pill " + kind;
+  $("statetext").textContent = text;
+}
+async function refresh() {
+  let st;
+  try { st = await api("/api/status"); }
+  catch (e) {
+    setState("bad", "No server");
+    $("banner").classList.add("show"); $("banner").querySelector("b").textContent = "Server unreachable.";
+    $("bannertext").textContent = "Check that zwo-webcam is still running on the host computer.";
+    return;
+  }
+  status = st;
+  const s = st.stats;
+  const offline = !!s.error || !st.camera;
+  setState(offline ? "bad" : "live", offline ? "Offline" : "Live");
+  $("banner").classList.toggle("show", offline);
+  $("banner").querySelector("b").textContent = "Camera offline.";
+  $("bannertext").textContent = (s.error || "") + " Reconnecting automatically.";
+  $("t-fps").textContent = s.fps.toFixed(1) + " fps";
+  $("t-dfps").textContent = shown.length > 1 ? ((shown.length - 1) / ((shown.at(-1) - shown[0]) / 1000)).toFixed(1) + " fps" : "–";
+  $("t-kbps").textContent = fmtKbps(s.kbps);
+  $("t-viewers").textContent = s.clients.length;
+  if (!st.camera) return;
+
+  const cam = st.camera, f = st.format;
+  $("camname").textContent = cam.name;
+  $("t-drop").textContent = st.dropped;
+  const temp = st.controls.find((c) => c.name === "Temperature");
+  $("t-temp").textContent = temp && temp.value !== null ? (temp.value / 10).toFixed(1) + " °C" : "–";
+  $("badge").hidden = false;
+  $("badge").textContent = `${f.width}×${f.height} · ${f.img_name} · bin ${f.bin}`;
+
+  const key = cam.name + "|" + st.controls.map((c) => c.name).join(",") + "|" + st.formats.map((x) => x.id).join(",");
+  if (key !== builtFor) { buildControls(st); builtFor = key; }
+  pressSeg($("bin"), f.bin);
+  pressSeg($("imgtype"), f.img_type);
+  $("stretch").checked = st.process.stretch;
+  $("debayer").checked = st.process.debayer;
+  pressSeg($("stamp"), st.process.timestamp);
+  pressSeg($("stamppos"), st.process.timestamp_pos);
+  $("stamppos").hidden = st.process.timestamp === "off";
+  if (document.activeElement !== $("bayer")) $("bayer").value = st.process.bayer === null ? "auto" : st.process.bayer;
+  for (const c of st.controls) {
+    const entry = controlsByName[c.name];
+    if (entry && c.value !== null) entry.el.update(c.value, c.auto);
+  }
+  const exp = st.controls.find((c) => c.name === "Exposure");
+  if (exp) markChips(exp.auto ? -1 : exp.value);
+
+  const rows = [
+    ["Model", cam.name],
+    ["Sensor", `${cam.max_width}×${cam.max_height}`],
+    ["Pixel size", `${cam.pixel_size} µm`],
+    ["ADC", `${cam.bit_depth}-bit`],
+    ["Type", cam.is_color ? `Colour · ${["RGGB", "BGGR", "GRBG", "GBRG"][cam.bayer]}` : "Mono"],
+    ["USB", `${cam.usb3 ? "USB 3" : "USB 2"} camera · ${cam.usb3_host ? "USB 3" : "USB 2"} port`],
+    ["Cooling", cam.cooler ? "Yes" : "No"],
+    cam.serial ? ["Serial", cam.serial] : null,
+  ].filter(Boolean);
+  $("info").innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${String(v).replace(/</g, "&lt;")}</dd>`).join("");
+}
+
+// ---------- start ----------
+if (store.get("night", "")) night(true);
+if (store.get("cross", "")) crosshair(true);
+startView();
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>
